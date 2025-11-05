@@ -30,7 +30,7 @@ class MotordriverNode(Node):
       self.arduino = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
       if not self.arduino.isOpen():
         raise Exception("No connection to motor controller")
-
+      time.sleep(2)
     self.arduino.write(("ALIVE;1;\n").encode())
 
     self.subscriber = self.create_subscription(
