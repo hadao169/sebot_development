@@ -95,12 +95,364 @@ This node now publishes both **ultrasonic distance** and **scan data** along wit
   - `motor_command` → Motor control commands from higher nodes.
 
 ```python
-# (Code unchanged)
+  import rclpy
+from rclpy.node import Node
+
+from std_msgs.msg import String, Int32, Int32MultiArray
+
+import serial
+import time
+
+from motordriver_msgs.msg import MotordriverMessage
+
+try:
+  from .simserial import SimSerial
+except:
+  from simserial import SimSerial
+  
+class MotordriverNode(Node):
+  def __init__(self):
+    super().__init__('motordriver_node')
+
+    self.msg = "x\n"
+    self.timercount = 0
+
+    # Declare parameters and get their values
+    self.declare_parameter('simulation', False)
+    self.simulation = self.get_parameter('simulation').value
+    self.get_logger().info(f'Starting motor_controller in simulation: {self.simulation}')
+    if self.simulation:
+      self.arduino = SimSerial()
+    else:
+      self.arduino = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
+      if not self.arduino.isOpen():
+        raise Exception("No connection to motor controller")
+
+    self.arduino.write(("ALIVE;1;\n").encode())
+
+    self.subscriber = self.create_subscription(
+        String,
+        'motor_command', # relative reference. If you write a slash in front, for example '/motor_command', it becomes absolute, and the namespace setting no longer affects it.
+        self.motor_command_callback,
+        10
+    )
+
+    self.publisher = self.create_publisher(
+        MotordriverMessage,
+        'motor_data',
+        10
+    )
+
+    self.distance_publisher = self.create_publisher(
+        Int32,
+        'ultrasonic_distance', # publish distance
+        10
+    )
+
+    self.scan_publisher = self.create_publisher(
+        Int32MultiArray,
+        'scan_data', 
+        10
+    )
+    
+    timer_period = 0.01  # Seconds <=> 100Hz
+    self.timer = self.create_timer(timer_period, self.timer_callback)
+
+
+  def timer_callback(self):
+    if self.msg != "x\n":
+        self.arduino.write(self.msg.encode()) 
+
+    if self.timercount == 11: # every 0.1s <=> 10Hz (inversely proportional to timer period) => after 11 cycles
+        if self.msg == "x\n":
+            self.arduino.write(self.msg.encode())
+
+        self.timercount = 0
+        # Read from Arduino (inWaiting return the number of bytes in buffer(temporary storage area))
+        while self.arduino.inWaiting()>0:
+            response = ""
+            try: 
+              response = self.arduino.readline().decode("utf8").strip()
+              if not response:
+                continue
+
+              answer = response.split(";") # return a list of strings of the values separated by ";" 
+
+              if len(answer) == 3 and answer[0] == "SCAN":
+                
+                leftDistance = int(answer[1])
+                rightDistance = int(answer[2])
+                scan_msg = Int32MultiArray()
+                scan_msg.data = [leftDistance, rightDistance]
+                self.scan_publisher.publish(scan_msg)
+                self.get_logger().info(f'>>> Published SCAN data: [L:{leftDistance}, R:{rightDistance}]')
+
+              elif len(answer) == 7:
+                msg = MotordriverMessage()
+                msg.encoder1 = int(answer[0])
+                msg.encoder2 = int(answer[1])
+                msg.speed1 = int(answer[2])
+                msg.speed2 = int(answer[3])
+                msg.pwm1 = int(answer[4])
+                msg.pwm2 = int(answer[5])
+                distance = int(answer[6]) 
+                distance_msg = Int32()
+                distance_msg.data = distance
+                self.publisher.publish(msg)
+                self.distance_publisher.publish(distance_msg)
+                self.get_logger().debug(f'Published 7-field motor data (Distance: {distance})') # Dùng debug để đỡ rối
+
+            except Exception as err:
+              self.get_logger().warn(f"Failed to parse line '{response}': {err}")
+              pass
+
+    self.msg = "x\n"
+    self.timercount += 1
+
+  def motor_command_callback(self, message):
+    self.msg = f"{message.data}\n"
+
+def main(args=None):
+  rclpy.init(args=args)
+  motordriver_node = MotordriverNode()
+  try:
+    rclpy.spin(motordriver_node)
+  except KeyboardInterrupt:
+    pass
+  finally:
+    motordriver_node.destroy_node()
+    if rclpy.ok():
+      rclpy.shutdown()
+
+
+if __name__ == '__main__':
+  main()
 ```
 
 ---
 
-#### 3.2 obstacle_avoid_node (obstacle_avoid.py)
+#### 3.2 Arduino (~/ros2_ws/arduino/motorcontroller/motorcontrller.ino)
+```cpp
+#include "Motor.h"
+#include <Servo.h>
+
+const int trigPin = A3;
+const int echoPin = A2;
+const int servoPin = A4;
+
+Servo servo;
+Motor *Motor::instances[2] = {nullptr, nullptr};
+int Motor::instanceCount = 0;
+
+// Motor motor1(4,5,9,2,3);
+Motor motor1(6, 8, 5, 3, 4);
+// Motor motor2(11, 12, 10, 2, 9);
+Motor motor2(7, 12, 11, 2, 9);
+
+int mode = 0; // 0=PWM 1=SPEED
+int alive = 0;
+int aliveSignal = 10 * 3; // 3s
+int printDelay = 0;
+
+enum ScanState {
+  DRIVING,
+  SWEEPING
+};
+ScanState scanState = DRIVING;
+unsigned long lastScanTime = 0;
+const int SWEEP_TIME = 800; // 800ms per action
+int sweepIndex = 0; // 0: start, 1: left, 2: middle, 3: right, 4: report
+int leftDistance = 1000;
+int rightDistance = 1000;
+
+unsigned long startTime = 0;
+String msg;
+
+void setup()
+{
+	motor1.begin();
+	motor2.begin();
+	servo.write(90);
+	pinMode(trigPin, OUTPUT);
+	pinMode(echoPin, INPUT);
+	servo.attach(servoPin);
+	Serial.begin(115200);
+}
+
+void loop()
+{
+	handleObstacleScan(millis());
+	readSerialPort();
+
+	if (millis() - startTime >= 1)
+	{
+		startTime++;
+		if (printDelay == 0)
+		{
+			printDelay = 100; // 100ms
+
+			if (alive > 0)
+			{
+				alive--;
+			}
+
+			if (aliveSignal == 0)
+			{
+				alive = 1;
+			}
+
+			motor1.run(mode, alive);
+			motor2.run(mode, alive);
+
+			sendData();
+		}
+		printDelay--;
+	}
+}
+
+void readSerialPort()
+{
+	msg = "";
+	String sa[4];
+	int r = 0, t = 0;
+
+	if (Serial.available())
+	{
+		msg = Serial.readStringUntil('\n');
+
+		for (int i = 0; i < msg.length(); i++)
+		{
+			if (msg.charAt(i) == ';')
+			{
+				sa[t] = msg.substring(r, i);
+				r = (i + 1);
+				t++;
+			}
+		}
+
+		if (sa[0] == "PWM")
+		{
+			mode = 0;
+			motor1.setPWM(sa[1].toInt());
+			motor2.setPWM(sa[2].toInt());
+		}
+		else if (sa[0] == "SPD")
+		{
+			mode = 1;
+			alive = aliveSignal;
+			motor1.setSPD(sa[1].toInt());
+			motor2.setSPD(sa[2].toInt());
+		}
+		else if (sa[0] == "PID")
+		{
+			motor1.setPID(sa[1].toFloat(), sa[2].toFloat(), sa[3].toFloat());
+			motor2.setPID(sa[1].toFloat(), sa[2].toFloat(), sa[3].toFloat());
+		}
+		else if (sa[0] == "ZERO")
+		{
+			motor1.zeroEncoder();
+			motor2.zeroEncoder();
+		}
+		else if (sa[0] == "ALIVE")
+		{
+			aliveSignal = sa[1].toInt() * 10;
+		}
+		else if (sa[0] == "SCAN")
+		{
+			scanState = SWEEPING;
+			sweepIndex = 0;
+			lastScanTime = millis();
+		}
+
+		Serial.flush();
+	}
+}
+
+void sendData()
+{
+	Serial.print(motor1.getEncoder());
+	Serial.print(";");
+	Serial.print(motor2.getEncoder());
+	Serial.print(";");
+	Serial.print(motor1.getSpeed());
+	Serial.print(";");
+	Serial.print(motor2.getSpeed());
+	Serial.print(";");
+	Serial.print(motor1.getMotorSpeed());
+	Serial.print(";");
+	Serial.print(motor2.getMotorSpeed());
+	Serial.print(";");
+	Serial.print(readDistance());
+	Serial.print("\n");
+}
+
+void sendScanData()
+{
+	Serial.print("SCAN;");
+	Serial.print(leftDistance);
+	Serial.print(";");
+	Serial.print(rightDistance);
+	Serial.print("\n");
+}
+
+int readDistance()
+{
+	digitalWrite(trigPin, LOW);
+	delayMicroseconds(2);
+	digitalWrite(trigPin, HIGH);
+	delayMicroseconds(10);
+	digitalWrite(trigPin, LOW);
+	long duration = pulseIn(echoPin, HIGH);
+	return (duration / 2 / 29.41);
+}
+
+void handleObstacleScan(unsigned long currentTime)
+{
+	if (scanState == DRIVING)
+	{
+		return;
+	}
+
+	if (scanState == SWEEPING)
+	{
+		if (currentTime - lastScanTime < SWEEP_TIME)
+		{
+			return;
+		}
+		lastScanTime = currentTime;
+
+		switch (sweepIndex)
+		{
+		case 0:
+			servo.write(30);
+			sweepIndex = 1;
+			break;
+		case 1:
+			rightDistance = readDistance();
+			servo.write(90);
+			sweepIndex = 2;
+			break;
+		case 2:
+			servo.write(150);
+			sweepIndex = 3;
+			break;
+		case 3:
+			leftDistance = readDistance();
+			servo.write(90);
+			sweepIndex = 4;
+			break;
+		case 4:
+			sendScanData();
+			sweepIndex = 0;
+			scanState = DRIVING;
+			break;
+		}
+	}
+}
+```
+---
+
+#### 3.3 obstacle_avoid_node (obstacle_avoid.py)
 Let's create a motordriver python package
 
 ```bash
@@ -248,17 +600,58 @@ def main(args=None):
 if __name__ == '__main__':
     main()
 ```
+
+All good, update `setup.py` and compile the package as part of the system:
+
+**~/ros2_ws/src/obstacle_avoid/setup.py**
+```python
+from setuptools import find_packages, setup
+
+package_name = 'obstacle_avoid'
+
+setup(
+    name=package_name,
+    version='0.0.0',
+    packages=find_packages(exclude=['test']),
+    data_files=[
+        ('share/ament_index/resource_index/packages',
+            ['resource/' + package_name]),
+        ('share/' + package_name, ['package.xml']),
+    ],
+    install_requires=['setuptools'],
+    zip_safe=True,
+    maintainer='ros2',
+    maintainer_email='ros2@todo.todo',
+    description='TODO: Package description',
+    license='TODO: License declaration',
+    tests_require=['pytest'],
+    entry_points={
+        'console_scripts': [
+            'obstacle_avoid_node = obstacle_avoid.obstacle_avoid:main',
+        ],
+    },
+)
+```
 ---
 
-#### 3.3 cmd_vel_node (cmd_vel.py)
-
+#### 3.4 cmd_vel_node (cmd_vel.py)
+**~/ros2_ws/src/diffdrive/diffdrive/cmd_vel.py**
 - **Updated Subscription:** from `cmd_vel` ➞ `cmd_vel_safe`  
-- Ensures all motion commands are validated by the obstacle avoidance logic.
+- This node has been updated to subscribe to the cmd_vel_safe topic instead of the original cmd_vel.
+By doing so, it ensures that all motion commands are first processed and verified by the ObstacleAvoiderNode before being sent to the motor driver.
 
+```python
+self.cmd_vel_subscriber = self.create_subscription(
+  Twist,
+  'cmd_vel_safe',
+  self.cmd_vel_callback,
+  10
+)
+```
 ---
 
-#### 3.4 Launch File Update
-
+#### 3.5 Launch File Update
+~/ros2_ws/src/diffdrive/launch/diffdrive.launch.py
 Added the obstacle avoidance node to the main launch configuration:
 
 ```python
