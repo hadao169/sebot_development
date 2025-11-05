@@ -668,11 +668,14 @@ Node(
 
 ## 4. System Workflow
 
+### 4. System Behavior Summary (Detailed)
+
 | Node | Subscribed Topics | Published Topics | Description |
 |------|--------------------|------------------|--------------|
-| `motordriver_node` | motor_command | motor_data, ultrasonic_distance, scan_data | Interfaces with Arduino for motor and sensor control |
-| `obstacle_avoid_node` | cmd_vel, ultrasonic_distance, scan_data | cmd_vel_safe, motor_command | Makes autonomous obstacle avoidance decisions |
-| `cmd_vel_node` | cmd_vel_safe | motor_command | Converts safe velocity commands to motor control signals |
+| **`motordriver_node`** | `motor_command` | `motor_data`, `ultrasonic_distance`, `scan_data` | **Hardware interface node.** It subscribes to `motor_command` to receive low-level control signals (speed and direction) from `cmd_vel_node`. Then, it drives the motors through the Arduino. It continuously publishes: <br>• `motor_data` – motor speed and encoder feedback for performance monitoring.<br>• `ultrasonic_distance` – distance from the front ultrasonic sensor.<br>• `scan_data` – side distance measurements from the servo-mounted ultrasonic sensor. |
+| **`obstacle_avoid_node`** | `cmd_vel`, `ultrasonic_distance`, `scan_data` | `cmd_vel_safe`, `motor_command` | **Decision-making node.** It subscribes to:<br>• `cmd_vel` – the original velocity command from teleoperation or navigation software.<br>• `ultrasonic_distance` – front obstacle distance from `motordriver_node`.<br>• `scan_data` – left/right obstacle distances.<br>Based on these inputs, it analyzes the environment and determines if movement is safe. It publishes:<br>• `cmd_vel_safe` – adjusted or stopped velocity command (safe to execute).<br>• `motor_command` – optional scan or stop requests (e.g., `"SCAN;"`) sent directly to `motordriver_node` when extra sensor data is needed. |
+| **`cmd_vel_node`** | `cmd_vel_safe` | `motor_command` | **Motion control node.** It subscribes to `cmd_vel_safe`, ensuring that only obstacle-free velocity commands are accepted. Then it translates these high-level Twist messages into `motor_command` strings suitable for the Arduino motor driver (e.g., formatted PWM or direction data). This ensures all motion commands pass through the obstacle avoidance logic before reaching the motors. |
+
 
 The obstacle avoidance system operates through continuous communication between three main ROS2 nodes:
 
