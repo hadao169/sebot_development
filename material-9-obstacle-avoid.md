@@ -232,6 +232,13 @@ if __name__ == '__main__':
 ---
 
 #### 3.2 Arduino (~/ros2_ws/arduino/motorcontroller/motorcontrller.ino)
+- The servo scanning code in handleObstacleScan() operates as a non-blocking state machine. When scanState is set to SWEEPING, the robot sequentially scans left, center, and right, with each step separated by a time interval defined by SWEEP_TIME.
+
+- Instead of using delay(), the program checks the current time with millis() against lastScanTime to determine when to move to the next scanning step. Meanwhile, other tasks such as motor control and Serial reading continue to run. The sweepIndex variable tracks the current scanning step, and after completing all three positions, the left and right distance data are sent to the host. The robot then returns to the DRIVING state.
+
+- Using a blocking delay() in this process would freeze the entire Arduino loop. During a delay, motors would stop updating, Serial commands from the host would be ignored, and sensor readings would not refresh. This could make the robot unresponsive or even lead to collisions.
+
+- By using millis()-based timing and a state machine, the robot can move, scan, and communicate simultaneously, keeping all operations non-blocking and responsive.
 ```cpp
 #include "Motor.h"
 #include <Servo.h>
