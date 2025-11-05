@@ -731,7 +731,7 @@ This feedback is used by the `obstacle_avoid_node` for real-time decision-making
 
 ---
 
-##### 🧩 4.5 Node Roles Overview
+#####  4.5 Node Roles Overview
 
 | Node | Role | Description |
 |------|------|-------------|
