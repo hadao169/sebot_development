@@ -651,7 +651,7 @@ self.cmd_vel_subscriber = self.create_subscription(
 ---
 
 #### 3.5 Launch File Update
-~/ros2_ws/src/diffdrive/launch/diffdrive.launch.py
+**~/ros2_ws/src/diffdrive/launch/diffdrive.launch.py**
 Added the obstacle avoidance node to the main launch configuration:
 
 ```python
