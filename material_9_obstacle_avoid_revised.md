@@ -666,7 +666,7 @@ Node(
 
 ---
 
-### 4. System Workflow
+## 4. System Workflow
 
 | Node | Subscribed Topics | Published Topics | Description |
 |------|--------------------|------------------|--------------|
@@ -684,14 +684,14 @@ Each node performs a specific role and exchanges data through predefined topics.
 
 ---
 
-#####  4.1 Command Input (Teleoperation or Autonomous Control)
+####  4.1 Command Input (Teleoperation or Autonomous Control)
 
 - The system starts when a movement command is published to the `/cmd_vel` topic — for example, from a joystick or navigation software.  
 - This command is received by the `obstacle_avoid_node`, which acts as the **decision layer**.
 
 ---
 
-##### 4.2 Obstacle Evaluation (Decision Layer)
+#### 4.2 Obstacle Evaluation (Decision Layer)
 
 The `obstacle_avoid_node` receives multiple inputs and evaluates them to ensure safe movement:
 
@@ -709,14 +709,14 @@ Decision process:
 
 ---
 
-#####  4.3 Safe Command Output (Motion Layer)
+####  4.3 Safe Command Output (Motion Layer)
 
 - The `cmd_vel_node` subscribes to `/cmd_vel_safe`, ensuring all velocity commands are verified by the obstacle avoidance logic.  
 - It converts these safe commands into **low-level motor control signals** (`motor_command`) and publishes them to the `motordriver_node`.
 
 ---
 
-#####  4.4 Hardware Execution and Feedback (Actuation Layer)
+####  4.4 Hardware Execution and Feedback (Actuation Layer)
 
 - The `motordriver_node` receives the `motor_command` and communicates with the **Arduino** to control the motors.
 - It also provides continuous feedback to close the control loop:
@@ -731,7 +731,7 @@ This feedback is used by the `obstacle_avoid_node` for real-time decision-making
 
 ---
 
-#####  4.5 Node Roles Overview
+####  4.5 Node Roles Overview
 
 | Node | Role | Description |
 |------|------|-------------|
