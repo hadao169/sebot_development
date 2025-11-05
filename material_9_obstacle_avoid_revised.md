@@ -666,11 +666,79 @@ Node(
 
 ---
 
-### 4. System Behavior Summary
+### 4. System Workflow
 
 | Node | Subscribed Topics | Published Topics | Description |
 |------|--------------------|------------------|--------------|
 | `motordriver_node` | motor_command | motor_data, ultrasonic_distance, scan_data | Interfaces with Arduino for motor and sensor control |
 | `obstacle_avoid_node` | cmd_vel, ultrasonic_distance, scan_data | cmd_vel_safe, motor_command | Makes autonomous obstacle avoidance decisions |
 | `cmd_vel_node` | cmd_vel_safe | motor_command | Converts safe velocity commands to motor control signals |
+
+The obstacle avoidance system operates through continuous communication between three main ROS2 nodes:
+
+- `motordriver_node`
+- `obstacle_avoid_node`
+- `cmd_vel_node`
+
+Each node performs a specific role and exchanges data through predefined topics.
+
+---
+
+#####  4.1 Command Input (Teleoperation or Autonomous Control)
+
+- The system starts when a movement command is published to the `/cmd_vel` topic — for example, from a joystick or navigation software.  
+- This command is received by the `obstacle_avoid_node`, which acts as the **decision layer**.
+
+---
+
+##### 4.2 Obstacle Evaluation (Decision Layer)
+
+The `obstacle_avoid_node` receives multiple inputs and evaluates them to ensure safe movement:
+
+| Topic | Description | Publisher |
+|--------|--------------|------------|
+| `/cmd_vel` | Desired velocity command | Teleop / Navigation software |
+| `/ultrasonic_distance` | Front obstacle distance | `motordriver_node` |
+| `/scan_data` | Left and right distances (servo-mounted sensor) | `motordriver_node` |
+
+Decision process:
+
+-  **If path is clear:** Forward the same command to `/cmd_vel_safe`.
+-  **If obstacle detected:** Modify or stop the velocity command to prevent collision.
+-  **In complex scenarios:** Send a `motor_command` (e.g., `"SCAN;"`) to request additional side-distance measurements.
+
+---
+
+#####  4.3 Safe Command Output (Motion Layer)
+
+- The `cmd_vel_node` subscribes to `/cmd_vel_safe`, ensuring all velocity commands are verified by the obstacle avoidance logic.  
+- It converts these safe commands into **low-level motor control signals** (`motor_command`) and publishes them to the `motordriver_node`.
+
+---
+
+#####  4.4 Hardware Execution and Feedback (Actuation Layer)
+
+- The `motordriver_node` receives the `motor_command` and communicates with the **Arduino** to control the motors.
+- It also provides continuous feedback to close the control loop:
+
+| Topic | Description |
+|--------|--------------|
+| `/motor_data` | Motor speed and encoder readings |
+| `/ultrasonic_distance` | Front obstacle distance |
+| `/scan_data` | Left and right distance measurements |
+
+This feedback is used by the `obstacle_avoid_node` for real-time decision-making.
+
+---
+
+##### 🧩 4.5 Node Roles Overview
+
+| Node | Role | Description |
+|------|------|-------------|
+| `obstacle_avoid_node` | **Brain** | Analyzes sensor data and adjusts motion commands to ensure safety. |
+| `cmd_vel_node` | **Translator** | Converts safe velocity commands into motor control signals. |
+| `motordriver_node` | **Executor** | Executes commands via Arduino and publishes sensor feedback. |
+
+---
+
 
