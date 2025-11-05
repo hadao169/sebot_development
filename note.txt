@@ -1,2 +1,38 @@
 29/10: 
-    - Fix error: turning in the wrong direction ()
+    - Fix error: turning in the wrong direction (cmd_vel node-wrong inverse kine formula)
+    - Make the motor stop in the unsafety range
+
+
+31/10:
+    - Integrate servo with sensor  // not done
+    - Can't make command to robot if it's in safety distance => solved  // not done
+    - Idea: ros2 always has the prioritized rights to control robot in all situations even when the servo is working 
+    - Errors: when the motor is initialized for the first time (when spd(0,0)), servo still rotates => only rotate after running and detecting the object
+
+    Note: 
+        - Non-blocking technique: ensure that motor PID keeps working and maintain the Serial communication being not blocked and updated while the servo is rotating
+        - Reactive Programming
+        - Timer conflict in Arduino board.
+    
+1/11:
+    - Can detect the object
+    - When object is in the unsafety zone (<20cm) => can control to turn right or left or move backward
+    - Servo can rotate and measure the left, middle, right distance
+    
+    - Error:
+        - Can't control servo intentionally
+        - Servo does not work anymore after the first time
+        - Servo always work once right after launching the file
+
+2/11: 
+    - Task: how it works if left and right distances are both smaller than 20
+        + Proposal: first robot move backward (need to calculate how far it will move), then stop (arduino receives the stop command => switch to sweeping mode => run servo => send the left, right and control)
+
+4/11:
+    - after the stop command (k) => whatever the next command is, servo always get triggered because it receives the SPD;0;0;
+    - after it detects the obstacle => stop => only after the obstacle is removed, robots continues to work and trigger the servo simultaneously 
+            => need to solve: it should trigger the servo right after it stops to know which the next direction  
+            => solution: State Mechanism
+
+Issues: 
+    - lack of PWM pin in Arduino and Servo and D10 use the same timer => switch 10 to 11 and 11 to 7

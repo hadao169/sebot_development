@@ -4,7 +4,6 @@
 
 #include <Arduino.h>
 
-
 class Motor {
   private:
     int controlPin1;

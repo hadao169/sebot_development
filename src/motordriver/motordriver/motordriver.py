@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 
-from std_msgs.msg import String, Int32
+from std_msgs.msg import String, Int32, Int32MultiArray
 
 import serial
 import time
@@ -51,49 +51,63 @@ class MotordriverNode(Node):
         'ultrasonic_distance', # publish distance
         10
     )
+
+    self.scan_publisher = self.create_publisher(
+        Int32MultiArray,
+        'scan_data', 
+        10
+    )
     
     timer_period = 0.01  # Seconds <=> 100Hz
     self.timer = self.create_timer(timer_period, self.timer_callback)
 
 
-  # use:  
   def timer_callback(self):
-    # Create message for Arduino
-    if self.msg != "x\n": # only send if there is a new command
-        self.arduino.write(self.msg.encode()) #change string into bytes, then send to arduino
+    if self.msg != "x\n":
+        self.arduino.write(self.msg.encode()) 
 
     if self.timercount == 11: # every 0.1s <=> 10Hz (inversely proportional to timer period) => after 11 cycles
         if self.msg == "x\n":
             self.arduino.write(self.msg.encode())
-            print(self.msg)
 
         self.timercount = 0
         # Read from Arduino (inWaiting return the number of bytes in buffer(temporary storage area))
-        if self.arduino.inWaiting()>0:
-          while self.arduino.inWaiting()>0:
-            answer=self.arduino.readline().decode("utf8").split(";") # return a list of strings of the values separated by ";" (reduce the number of bytes in buffer)
-            print(answer)
-          msg = MotordriverMessage()
+        while self.arduino.inWaiting()>0:
+            response = ""
+            try: 
+              response = self.arduino.readline().decode("utf8").strip()
+              if not response:
+                continue
 
-          try:
-            msg.encoder1 = int(answer[0])
-            msg.encoder2 = int(answer[1])
-            msg.speed1 = int(answer[2])
-            msg.speed2 = int(answer[3])
-            msg.pwm1 = int(answer[4])
-            msg.pwm2 = int(answer[5])
+              answer = response.split(";") # return a list of strings of the values separated by ";" 
 
-            # Read distance value from the ultrasonic sensor
-            distance = int(answer[6]) 
-            distance_msg = Int32()
-            distance_msg.data = distance
+              if len(answer) == 3 and answer[0] == "SCAN":
+                
+                leftDistance = int(answer[1])
+                rightDistance = int(answer[2])
+                scan_msg = Int32MultiArray()
+                scan_msg.data = [leftDistance, rightDistance]
+                self.scan_publisher.publish(scan_msg)
+                self.get_logger().info(f'>>> Published SCAN data: [L:{leftDistance}, R:{rightDistance}]')
 
-            # Publish message on topic
-            self.publisher.publish(msg)
-            self.distance_publisher.publish(distance_msg) 
+              elif len(answer) == 7:
+                msg = MotordriverMessage()
+                msg.encoder1 = int(answer[0])
+                msg.encoder2 = int(answer[1])
+                msg.speed1 = int(answer[2])
+                msg.speed2 = int(answer[3])
+                msg.pwm1 = int(answer[4])
+                msg.pwm2 = int(answer[5])
+                distance = int(answer[6]) 
+                distance_msg = Int32()
+                distance_msg.data = distance
+                self.publisher.publish(msg)
+                self.distance_publisher.publish(distance_msg)
+                self.get_logger().debug(f'Published 7-field motor data (Distance: {distance})') # Dùng debug để đỡ rối
 
-          except Exception as err:
-            pass
+            except Exception as err:
+              self.get_logger().warn(f"Failed to parse line '{response}': {err}")
+              pass
 
     self.msg = "x\n"
     self.timercount += 1
@@ -116,3 +130,4 @@ def main(args=None):
 
 if __name__ == '__main__':
   main()
+

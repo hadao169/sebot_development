@@ -95,13 +95,13 @@ void Motor::updateEncoderInstance() {
   dir = digitalRead(encoderPin2);
   encoderPosCount+=clk==dir?-1:1;
 }
-static void Motor::handleInterrupt0() {
+ void Motor::handleInterrupt0() {
   if(instances[0]) {
     instances[0]->updateEncoderInstance();
   }
 }
 
-static void Motor::handleInterrupt1() {
+ void Motor::handleInterrupt1() {
   if(instances[1]) {
     instances[1]->updateEncoderInstance();
   }
